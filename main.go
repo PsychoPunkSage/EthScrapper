@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math/big"
 	"os"
 	"strconv"
 	"time"
@@ -23,6 +24,11 @@ type EventData struct {
 	LogIndex   uint        `json:"logIndex"`
 }
 
+type TestData struct {
+	MsgData string `json:"msg"`
+	Data    uint   `json:"data"`
+}
+
 var ctx = context.Background()
 
 func main() {
@@ -30,8 +36,8 @@ func main() {
 
 	err := godotenv.Load(".env")
 	if err != nil {
-		fmt.Println("Error:: loading .env file")
-		fmt.Println("Error:: Please properly setup .env in the root of the project (see .env.example) ")
+		log.Fatalf("[ERROR]		loading .env file\n")
+		log.Fatalf("[ERROR]		Please properly setup .env in the root of the project (see .env.example)\n")
 		return
 	}
 
@@ -51,10 +57,10 @@ func main() {
 	// fmt.Println(reflect.TypeOf(topic))
 
 	// Connect to Sepolia
-	client, err := ethclient.Dial(alchemyProjectId)
+	client, err := ethclient.Dial("https://sepolia.infura.io/v3/" + alchemyProjectId)
 	if err != nil {
-		fmt.Println("[ERROR]		Failed to connect to Ethereum node")
-		fmt.Println("[ERROR]		Check you Project ID (i.e. RPC-URL)")
+		log.Fatalf("[ERROR]		Failed to connect to Ethereum node\n")
+		log.Fatalf("[ERROR]		Check you Project ID (i.e. RPC-URL)\n")
 		fmt.Println(err)
 		return
 	}
@@ -70,22 +76,30 @@ func main() {
 	address := common.HexToAddress(contractAddress)
 	topicHash := common.HexToHash(topic)
 
+	// fmt.Println(address)
+	// fmt.Println(topicHash)
+
 	// query logs
 	query := ethereum.FilterQuery{
 		Addresses: []common.Address{address},
 		Topics:    [][]common.Hash{{topicHash}},
+		FromBlock: big.NewInt(6000913),
+		ToBlock:   big.NewInt(6510913),
 	}
+	// fmt.Printf("Found Query: \n%v \n", query)
 
 	logs, err := client.FilterLogs(ctx, query)
 	if err != nil {
-		fmt.Println("[ERROR]		Failed to query logs")
+		log.Fatalf("[ERROR]		Failed to query logs\n")
 		fmt.Println(err)
 		return
 	}
+	// fmt.Printf("Found %d logs\n", len(logs))
 
 	// Store logs in Redis
 	index := 0
 	for _, vlogs := range logs {
+		fmt.Printf("Log: %+v\n", vlogs)
 		block, err := client.BlockByHash(ctx, vlogs.BlockHash)
 		if err != nil {
 			log.Fatalf("[ERROR]		Failed to retrieve block: %v", err)
@@ -114,6 +128,9 @@ func main() {
 		index++
 	}
 
+	// Test Redis Connection
+	TestDatabase(rdb)
+
 	log.Println("|=================================|")
 	log.Println("| All events stored successfully. |")
 	log.Println("|=================================|")
@@ -141,5 +158,21 @@ func retrieve(redisHost, redisPort, redisPassword string) {
 			log.Fatalf("Failed to fetch value for key %s: %v", key, err)
 		}
 		log.Printf("Key: %s, Value: %s\n", key, val)
+	}
+}
+
+func TestDatabase(rdb *redis.Client) {
+	data := TestData{
+		MsgData: "test data",
+		Data:    42,
+	}
+	serializedData, err := json.Marshal(data)
+	if err != nil {
+		log.Fatalf("[ERROR]        Failed to serialize data: %v", err)
+	}
+
+	err = rdb.Set(ctx, strconv.Itoa(19), serializedData, 0).Err()
+	if err != nil {
+		log.Fatalf("[ERROR]        Failed to store data in Redis: %v", err)
 	}
 }
