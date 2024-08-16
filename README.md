@@ -1,7 +1,15 @@
 # EthScrapper
 
+>> Major refactor of the codebase, seperated all the components into different `packages` to keep things clean in `main.go` file.
+
+## Key Highlights
+
+* **client**: Contains code related to `Client side operation` and `Query and Store`
+* **database**: Contains all the operation related to `Database connection & Health Check`
+* **utils**: Logic to find `fastest RPC URL`
+
 ## Reqirements
-1. `Go`: 
+1. `Go`:
 
 <details>
 <summary>
