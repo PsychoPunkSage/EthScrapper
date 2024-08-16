@@ -117,4 +117,29 @@ func main() {
 	log.Println("|=================================|")
 	log.Println("| All events stored successfully. |")
 	log.Println("|=================================|")
+
+	retrieve(redisHost, redisPort, redisPassword)
+}
+
+func retrieve(redisHost, redisPort, redisPassword string) {
+	// Connect to Redis
+	rdb := redis.NewClient(&redis.Options{
+		Addr:     redisHost + ":" + redisPort,
+		Password: redisPassword,
+		DB:       0,
+	})
+
+	// Fetch and print all keys and values
+	keys, err := rdb.Keys(ctx, "*").Result()
+	if err != nil {
+		log.Fatalf("Failed to fetch keys: %v", err)
+	}
+
+	for _, key := range keys {
+		val, err := rdb.Get(ctx, key).Result()
+		if err != nil {
+			log.Fatalf("Failed to fetch value for key %s: %v", key, err)
+		}
+		log.Printf("Key: %s, Value: %s\n", key, val)
+	}
 }
