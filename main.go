@@ -42,7 +42,7 @@ func main() {
 	}
 
 	// Get all the data from the .env file (all are #strings)
-	alchemyProjectId := os.Getenv("ALCHEMY_PROJECT_ID")
+	infuraProjectId := os.Getenv("INFURA_PROJECT_ID")
 	redisHost := os.Getenv("REDIS_HOST")
 	redisPort := os.Getenv("REDIS_PORT")
 	redisPassword := os.Getenv("REDIS_PASSWORD")
@@ -57,13 +57,20 @@ func main() {
 	// fmt.Println(reflect.TypeOf(topic))
 
 	// Connect to Sepolia
-	client, err := ethclient.Dial("https://sepolia.infura.io/v3/" + alchemyProjectId)
+	client, err := ethclient.Dial("https://sepolia.infura.io/v3/" + infuraProjectId)
 	if err != nil {
 		log.Fatalf("[ERROR]		Failed to connect to Ethereum node\n")
 		log.Fatalf("[ERROR]		Check you Project ID (i.e. RPC-URL)\n")
 		fmt.Println(err)
 		return
 	}
+
+	// Check RPC connection (Print latest Block)
+	header, err := client.HeaderByNumber(ctx, nil)
+	if err != nil {
+		log.Fatalf("Failed to get latest block: %v", err)
+	}
+	fmt.Printf("Latest block number: %d\n", header.Number.Uint64())
 
 	// Connect with Redis
 	rdb := redis.NewClient(&redis.Options{
@@ -72,19 +79,20 @@ func main() {
 		DB:       0,
 	})
 
+	// Test Redis Connection
+	TestDatabase(rdb)
+	retrieve(redisHost, redisPort, redisPassword)
+
 	// Topic and Address:
 	address := common.HexToAddress(contractAddress)
 	topicHash := common.HexToHash(topic)
-
-	// fmt.Println(address)
-	// fmt.Println(topicHash)
 
 	// query logs
 	query := ethereum.FilterQuery{
 		Addresses: []common.Address{address},
 		Topics:    [][]common.Hash{{topicHash}},
-		FromBlock: big.NewInt(6000913),
-		ToBlock:   big.NewInt(6510913),
+		FromBlock: big.NewInt(0), // Start from the first block on Sepolia
+		ToBlock:   nil,
 	}
 	// fmt.Printf("Found Query: \n%v \n", query)
 
@@ -94,7 +102,7 @@ func main() {
 		fmt.Println(err)
 		return
 	}
-	// fmt.Printf("Found %d logs\n", len(logs))
+	fmt.Printf("Found %d logs\n", len(logs))
 
 	// Store logs in Redis
 	index := 0
@@ -128,14 +136,9 @@ func main() {
 		index++
 	}
 
-	// Test Redis Connection
-	TestDatabase(rdb)
-
 	log.Println("|=================================|")
 	log.Println("| All events stored successfully. |")
 	log.Println("|=================================|")
-
-	retrieve(redisHost, redisPort, redisPassword)
 }
 
 func retrieve(redisHost, redisPort, redisPassword string) {
