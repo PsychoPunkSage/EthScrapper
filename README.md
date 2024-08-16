@@ -17,7 +17,7 @@ export GOPATH=$HOME/go
 export PATH=$PATH:$GOPATH/bin
 ```
 
-</details><br>
+</details>
 
 2. `Docker`: [Installation](https://docs.docker.com/engine/install/)
 3. `API Key`: Visit `Infura` or `Alchemy`
@@ -27,6 +27,8 @@ export PATH=$PATH:$GOPATH/bin
 ### 1. Setup `.env` file
 
 > Set up a `.env` file in the root of your project directory. Follow `.env.example` to create the `.env` file.
+
+By default, passowrd of RedisDB is `ethscrapper` (use it in `.env` file). You can change it in **`redis.conf`** (`./conf/redis.conf`) 
 
 ### 2. Build the project
 
