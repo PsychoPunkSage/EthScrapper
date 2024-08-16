@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"ethscrapper/utils"
 	"fmt"
 	"log"
 	"math/big"
@@ -42,7 +43,10 @@ func main() {
 	}
 
 	// Get all the data from the .env file (all are #strings)
-	infuraProjectId := os.Getenv("INFURA_PROJECT_ID")
+	rpcEnpoints := []string{
+		os.Getenv("INFURA_PROJECT_ID"),
+		os.Getenv("ALCHEMY_PROJECT_ID"),
+	}
 	redisHost := os.Getenv("REDIS_HOST")
 	redisPort := os.Getenv("REDIS_PORT")
 	redisPassword := os.Getenv("REDIS_PASSWORD")
@@ -56,7 +60,11 @@ func main() {
 	// fmt.Println(reflect.TypeOf(contractAddress))
 	// fmt.Println(reflect.TypeOf(topic))
 
-	// Connect to Sepolia
+	// Get Minimum latencies
+	fastestEndpoint := utils.SelectFastestRPC(rpcEnpoints, utils.Measurelatency(rpcEnpoints))
+	fmt.Printf("[FASTEST] Selected endpoint: %s\n", fastestEndpoint)
+
+	// Connect to Fastest RPC Client
 	client, err := ethclient.Dial("https://sepolia.infura.io/v3/" + infuraProjectId)
 	if err != nil {
 		log.Fatalf("[ERROR]		Failed to connect to Ethereum node\n")
@@ -68,7 +76,7 @@ func main() {
 	// Check RPC connection (Print latest Block)
 	header, err := client.HeaderByNumber(ctx, nil)
 	if err != nil {
-		log.Fatalf("Failed to get latest block: %v", err)
+		log.Fatalf("[ERROR]		Failed to get latest block: %v", err)
 	}
 	fmt.Printf("Latest block number: %d\n", header.Number.Uint64())
 
@@ -92,7 +100,7 @@ func main() {
 		Addresses: []common.Address{address},
 		Topics:    [][]common.Hash{{topicHash}},
 		FromBlock: big.NewInt(0), // Start from the first block on Sepolia
-		ToBlock:   nil,
+		ToBlock:   big.NewInt(int64(header.Number.Uint64())),
 	}
 	// fmt.Printf("Found Query: \n%v \n", query)
 
@@ -103,6 +111,20 @@ func main() {
 		return
 	}
 	fmt.Printf("Found %d logs\n", len(logs))
+
+	// If no logs are found, try without filtering by topics to verify logs exist
+	if len(logs) == 0 {
+		fmt.Println("No logs found with topic filter, querying without topics...")
+		query.Topics = nil // Remove topic filter
+
+		logs, err = client.FilterLogs(ctx, query)
+		if err != nil {
+			fmt.Println("[ERROR]		Failed to query logs without topics")
+			fmt.Println(err)
+			return
+		}
+		fmt.Printf("Found %d logs without topics\n", len(logs))
+	}
 
 	// Store logs in Redis
 	index := 0
