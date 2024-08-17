@@ -14,21 +14,17 @@ import (
 	"github.com/go-redis/redis/v8"
 )
 
-func QueryAndStoreLogs(client *ethclient.Client, rdb *redis.Client, contractAddress, topic string) {
-	// Topic and Address:
-	address := common.HexToAddress(contractAddress)
+func QueryAndStoreLogs(client *ethclient.Client, rdb *redis.Client, contractAddress, topic string, blockNumberBig *big.Int) {
+	// Topic & latest block number:
 	topicHash := common.HexToHash(topic)
+	address := common.HexToAddress(contractAddress)
 
-	header, err := client.HeaderByNumber(ctx, nil)
-	if err != nil {
-		log.Fatalf("[ERROR]		Failed to get latest block: %v", err)
-	}
-
+	// query logs
 	query := ethereum.FilterQuery{
 		Addresses: []common.Address{address},
 		Topics:    [][]common.Hash{{topicHash}},
-		FromBlock: big.NewInt(0), // Start from the first block on Sepolia
-		ToBlock:   big.NewInt(int64(header.Number.Uint64())),
+		FromBlock: new(big.Int).Sub(blockNumberBig, big.NewInt(100)), // Only 100 blocks considered
+		ToBlock:   blockNumberBig,
 	}
 
 	logs, err := client.FilterLogs(ctx, query)
@@ -37,37 +33,25 @@ func QueryAndStoreLogs(client *ethclient.Client, rdb *redis.Client, contractAddr
 		fmt.Println(err)
 		return
 	}
-	fmt.Printf("Found %d logs\n", len(logs))
-
-	// If no logs are found, try without filtering by topics to verify logs exist
-	if len(logs) == 0 {
-		fmt.Println("No logs found with topic filter, querying without topics...")
-		query.Topics = nil // Remove topic filter
-
-		logs, err = client.FilterLogs(ctx, query)
-		if err != nil {
-			fmt.Println("[ERROR]		Failed to query logs without topics")
-			fmt.Println(err)
-			return
-		}
-		fmt.Printf("Found %d logs without topics\n", len(logs))
-	}
+	fmt.Printf("[INFO]		Found <%d> logs\n", len(logs))
+	fmt.Printf("[INFO]        	- related to Topic <%v>\n", topicHash)
+	fmt.Printf("[INFO]        	- in Contract Address <%v>\n", address)
 
 	// Store logs in Redis
 	index := 0
-	for _, vlogs := range logs {
-		fmt.Printf("Log: %+v\n", vlogs)
-		block, err := client.BlockByHash(ctx, vlogs.BlockHash)
+	for _, vlog := range logs {
+		// fmt.Printf("Log: %+v\n", vlog)
+		block, err := client.BlockByHash(ctx, vlog.BlockHash)
 		if err != nil {
 			log.Fatalf("[ERROR]		Failed to retrieve block: %v", err)
 		}
 
 		// Extract Data in question
 		data := EventData{
-			L1RootInfo: string(vlogs.Data),
+			L1RootInfo: string(vlog.Data),
 			Blocktime:  time.Unix(int64(block.Time()), 0),
 			ParentHash: block.ParentHash(),
-			LogIndex:   vlogs.Index,
+			LogIndex:   vlog.Index,
 		}
 
 		// Serialize the data (Go Data ==> JSON)
