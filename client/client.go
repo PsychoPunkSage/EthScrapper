@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"math/big"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -19,20 +20,29 @@ type EventData struct {
 	LogIndex   uint        `json:"logIndex"`
 }
 
-func ConnectToEthereumClient(endpoint string) *ethclient.Client {
+func ConnectToEthereumClient(endpoint string) (*ethclient.Client, *big.Int) {
 	client, err := ethclient.Dial(endpoint)
 	if err != nil {
 		log.Fatalf("[ERROR]		Failed to connect to Ethereum node\n")
 		log.Fatalf("[ERROR]		Check you Project ID (i.e. RPC-URL)\n")
 		fmt.Println(err)
-		return nil
+		return nil, nil
 	}
 
+	chainid, err := client.ChainID(context.Background())
+	if err != nil {
+		log.Fatalf("[ERROR]		Failed to get ChainID: %v", err)
+	}
+	fmt.Printf("[INFO]		ChainID: %d\n", chainid.Int64())
+
+	// Check RPC connection (Print latest Block)
 	header, err := client.HeaderByNumber(ctx, nil)
 	if err != nil {
 		log.Fatalf("[ERROR]		Failed to get latest block: %v", err)
 	}
-	fmt.Printf("Latest block number: %d\n", header.Number.Uint64())
+	fmt.Printf("[INFO]		Latest block number: %d\n", header.Number.Uint64())
 
-	return client
+	blockNumberBig := big.NewInt(int64(header.Number.Uint64()))
+
+	return client, blockNumberBig
 }
