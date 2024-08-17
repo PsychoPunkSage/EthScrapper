@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"ethscrapper/client"
 	"ethscrapper/database"
 	"ethscrapper/utils"
@@ -11,8 +10,6 @@ import (
 
 	"github.com/joho/godotenv"
 )
-
-var ctx = context.Background()
 
 func main() {
 	fmt.Println("Welcome to EthScrapper for Sepolia")
