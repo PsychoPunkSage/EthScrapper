@@ -1,7 +1,10 @@
 build:
 	@go build -o bin/fs
 
-run: build start-redis
+start: build start-redis
+	@./bin/fs
+
+run: build
 	@./bin/fs
 
 test:
@@ -12,5 +15,5 @@ start-redis:
 		-v $(PWD)/conf/redis.conf:/usr/local/etc/redis/redis.conf \
 		-p 6379:6379 redis redis-server /usr/local/etc/redis/redis.conf
 
-stop-redis:
+stop:
 	@sudo docker stop redis

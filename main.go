@@ -32,13 +32,6 @@ func main() {
 	contractAddress := os.Getenv("CONTRACT_ADDRESS")
 	topic := os.Getenv("TOPIC")
 
-	// fmt.Println(reflect.TypeOf(alchemyProjectId))
-	// fmt.Println(reflect.TypeOf(redisHost))
-	// fmt.Println(reflect.TypeOf(redisPort))
-	// fmt.Println(reflect.TypeOf(redisPassword))
-	// fmt.Println(reflect.TypeOf(contractAddress))
-	// fmt.Println(reflect.TypeOf(topic))
-
 	// Get Minimum latencies
 	fastestEndpoint := utils.SelectFastestRPC(rpcEnpoints, utils.Measurelatency(rpcEnpoints))
 	fmt.Printf("[FASTEST] Selected endpoint: %s\n", fastestEndpoint)
