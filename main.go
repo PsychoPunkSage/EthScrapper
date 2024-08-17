@@ -65,12 +65,18 @@ func main() {
 		return
 	}
 
+	chainid, err := client.ChainID(context.Background())
+	if err != nil {
+		log.Fatalf("[ERROR]		Failed to get ChainID: %v", err)
+	}
+	fmt.Printf("[INFO]		ChainID: %d\n", chainid.Int64())
+
 	// Check RPC connection (Print latest Block)
 	header, err := client.HeaderByNumber(ctx, nil)
 	if err != nil {
-		log.Fatalf("Failed to get latest block: %v", err)
+		log.Fatalf("[ERROR]		Failed to get latest block: %v", err)
 	}
-	fmt.Printf("Latest block number: %d\n", header.Number.Uint64())
+	fmt.Printf("[INFO]		Latest block number: %d\n", header.Number.Uint64())
 
 	// Connect with Redis
 	rdb := redis.NewClient(&redis.Options{
