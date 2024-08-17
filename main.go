@@ -37,8 +37,8 @@ func main() {
 	fmt.Printf("[FASTEST] Selected endpoint: %s\n", fastestEndpoint)
 
 	// Connect to Fastest RPC Client
-	ethclient := client.ConnectToEthereumClient(fastestEndpoint)
-	if ethclient == nil {
+	ethclient, latestBlock := client.ConnectToEthereumClient(fastestEndpoint)
+	if ethclient == nil || latestBlock == nil {
 		return
 	}
 
@@ -50,5 +50,5 @@ func main() {
 	database.RetrieveRedisData(redisHost, redisPort, redisPassword)
 
 	// Query and store logs
-	client.QueryAndStoreLogs(ethclient, rdbclient, contractAddress, topic)
+	client.QueryAndStoreLogs(ethclient, rdbclient, contractAddress, topic, latestBlock)
 }
