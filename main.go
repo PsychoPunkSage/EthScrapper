@@ -46,7 +46,7 @@ func main() {
 	redisHost := os.Getenv("REDIS_HOST")
 	redisPort := os.Getenv("REDIS_PORT")
 	redisPassword := os.Getenv("REDIS_PASSWORD")
-	contractAddress := os.Getenv("CONTRACT_ADDRESS")
+	// contractAddress := os.Getenv("CONTRACT_ADDRESS")
 	topic := os.Getenv("TOPIC")
 
 	// fmt.Println(reflect.TypeOf(alchemyProjectId))
@@ -90,25 +90,38 @@ func main() {
 	retrieve(redisHost, redisPort, redisPassword)
 
 	// Topic and Address:
-	address := common.HexToAddress(contractAddress)
+	_ = common.HexToAddress("0xb02A2EdA1b317FBd16760128836B0Ac59B560e9D")
 	topicHash := common.HexToHash(topic)
 
+	blockNumber, err := client.BlockNumber(context.Background())
+	if err != nil {
+		fmt.Println("Failed to retrieve block number:", err)
+		return
+	}
+	blockNumberBig := big.NewInt(int64(blockNumber))
+	// eventSignatureBytes := []byte("Approve(address,uint256)")
+	// fmt.Printf("[INFO]        Event Signer: %v\n", eventSignatureBytes)
+	// eventSignaturehash := crypto.Keccak256Hash(eventSignatureBytes)
+	// fmt.Printf("[INFO]        Event Signer (hash): %v\n", eventSignaturehash)
+
 	// query logs
-	query := ethereum.FilterQuery{
-		Addresses: []common.Address{address},
-		Topics:    [][]common.Hash{{topicHash}},
-		FromBlock: big.NewInt(0), // Start from the first block on Sepolia
-		ToBlock:   nil,
+	q := ethereum.FilterQuery{
+		FromBlock: new(big.Int).Sub(blockNumberBig, big.NewInt(10000)),
+		// FromBlock: big.NewInt(0),
+		ToBlock: blockNumberBig,
+		Topics: [][]common.Hash{
+			{topicHash},
+		},
 	}
 	// fmt.Printf("Found Query: \n%v \n", query)
 
-	logs, err := client.FilterLogs(ctx, query)
+	logs, err := client.FilterLogs(ctx, q)
 	if err != nil {
 		log.Fatalf("[ERROR]		Failed to query logs\n")
 		fmt.Println(err)
 		return
 	}
-	fmt.Printf("Found %d logs\n", len(logs))
+	fmt.Printf("[INFO]        Found %d logs\n", len(logs))
 
 	// Store logs in Redis
 	index := 0
