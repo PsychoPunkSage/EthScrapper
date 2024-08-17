@@ -17,7 +17,7 @@ Output
 </summary>
 
 
-```json
+```js
 a3c253ee34c6bf9efae59b3ffc75da226803081ddc04e3928812307f14629f8b
 Welcome to EthScrapper for Sepolia
 [ERROR | utils]		pinging endpoint https://eth-sepolia.g.alchemy.com/v2/XXXXXXXXXX_XXXXXXXXXXXXXXXXXX-k1: Get "https://eth-sepolia.g.alchemy.com/v2/XXXXXXXXXX_XXXXXXXXXXXXXXXXXX-k1": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
