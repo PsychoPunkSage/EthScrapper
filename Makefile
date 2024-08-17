@@ -3,6 +3,7 @@ build:
 
 run: build start-redis
 	@./bin/fs
+	stop-redis
 
 test:
 	@go test ./... -v
