@@ -48,7 +48,7 @@ func main() {
 	}
 
 	// Get all Env variables.
-	infuraProjectId := os.Getenv("INFURA_PROJECT_ID")
+	projectId := os.Getenv("PROJECT_ID")
 	redisHost := os.Getenv("REDIS_HOST")
 	redisPort := os.Getenv("REDIS_PORT")
 	redisPassword := os.Getenv("REDIS_PASSWORD")
@@ -56,7 +56,8 @@ func main() {
 	topic := os.Getenv("TOPIC")
 
 	// Get am Ethereum Client
-	client, err := ethclient.Dial("https://sepolia.infura.io/v3/" + infuraProjectId)
+	// client, err := ethclient.Dial("https://sepolia.infura.io/v3/" + infuraProjectId)
+	client, err := ethclient.Dial(projectId)
 	if err != nil {
 		log.Fatalf("[ERROR]		Failed to connect to Ethereum node\n")
 		fmt.Println(err)
@@ -64,12 +65,6 @@ func main() {
 	}
 
 	// Test Connection
-	// chainid, err := client.ChainID(ctx)
-	// if err != nil {
-	// 	log.Fatalf("[ERROR]		Failed to get ChainID: %v", err)
-	// }
-	// fmt.Printf("[INFO]		ChainID: %d\n", chainid.Int64())
-
 	header, err := client.HeaderByNumber(ctx, nil)
 	if err != nil {
 		log.Fatalf("[ERROR]		Failed to get latest block: %v", err)
@@ -168,6 +163,22 @@ func main() {
 	exportDataToLogFile(rdb, "redis.log")
 }
 
+func TestDatabase(rdb *redis.Client) {
+	data := TestData{
+		MsgData: "test data",
+		Data:    42,
+	}
+	serializedData, err := json.Marshal(data)
+	if err != nil {
+		log.Fatalf("[ERROR]        Failed to serialize data: %v", err)
+	}
+
+	err = rdb.Set(ctx, strconv.Itoa(19112929), serializedData, 0).Err()
+	if err != nil {
+		log.Fatalf("[ERROR]        Failed to store data in Redis: %v", err)
+	}
+}
+
 func retrieve(rdb *redis.Client) {
 	keys, err := rdb.Keys(ctx, "*").Result()
 	if err != nil {
@@ -187,23 +198,6 @@ func retrieve(rdb *redis.Client) {
 	// }
 }
 
-func TestDatabase(rdb *redis.Client) {
-	data := TestData{
-		MsgData: "test data",
-		Data:    42,
-	}
-	serializedData, err := json.Marshal(data)
-	if err != nil {
-		log.Fatalf("[ERROR]        Failed to serialize data: %v", err)
-	}
-
-	err = rdb.Set(ctx, strconv.Itoa(19112929), serializedData, 0).Err()
-	if err != nil {
-		log.Fatalf("[ERROR]        Failed to store data in Redis: %v", err)
-	}
-}
-
-// Export key-value pairs to a .log file
 func exportDataToLogFile(rdb *redis.Client, filename string) {
 	file, err := os.Create(filename)
 	if err != nil {
@@ -246,7 +240,7 @@ func fetchBlockWithRetry(client *ethclient.Client, blockHash common.Hash, maxRet
 		// Check if the error is a rate limit error
 		if strings.Contains(err.Error(), "429 Too Many Requests") {
 			backoffDuration := time.Duration(i+1) * time.Second
-			fmt.Printf("[WARN] Rate limit exceeded, retrying in %s...\n", backoffDuration)
+			fmt.Printf("[WARN]		Rate limit exceeded, retrying in %s...\n", backoffDuration)
 			time.Sleep(backoffDuration)
 		} else {
 			return nil, err
