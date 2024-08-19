@@ -37,7 +37,7 @@ func TestDatabase(rdb *redis.Client) {
 		log.Fatalf("[ERROR]        Failed to serialize data: %v", err)
 	}
 
-	err = rdb.Set(ctx, strconv.Itoa(19), serializedData, 0).Err()
+	err = rdb.Set(ctx, strconv.Itoa(19191919), serializedData, 0).Err()
 	if err != nil {
 		log.Fatalf("[ERROR]        Failed to store data in Redis: %v", err)
 	}
