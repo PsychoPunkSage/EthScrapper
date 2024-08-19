@@ -1,7 +1,10 @@
 build:
 	@go build -o bin/fs
 
-run: build start-redis
+start: build start-redis
+	@./bin/fs
+
+run: build
 	@./bin/fs
 
 test:
