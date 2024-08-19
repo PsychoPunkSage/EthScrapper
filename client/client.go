@@ -5,13 +5,17 @@ import (
 	"fmt"
 	"log"
 	"math/big"
+	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
 )
 
-var ctx = context.Background()
+var (
+	ctx = context.Background()
+	wg  sync.WaitGroup
+)
 
 type EventData struct {
 	L1RootInfo string      `json:"l1RootInfo"`
