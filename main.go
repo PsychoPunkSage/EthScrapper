@@ -8,6 +8,7 @@ import (
 	"math/big"
 	"os"
 	"strconv"
+	"strings"
 	"sync" // CHANGED: Added for concurrency
 	"time"
 
@@ -120,7 +121,7 @@ func main() {
 		go func(vlog types.Log, index int) {
 			defer wg.Done()
 
-			block, err := client.BlockByHash(ctx, vlog.BlockHash)
+			block, err := fetchBlockWithRetry(client, vlog.BlockHash, 5)
 			if err != nil {
 				log.Printf("[ERROR]		Failed to retrieve block: %v", err)
 				return
@@ -230,4 +231,27 @@ func exportDataToLogFile(rdb *redis.Client, filename string) {
 	}
 
 	log.Printf("Exported %d key-value pairs to %s\n", len(keys), filename)
+}
+
+func fetchBlockWithRetry(client *ethclient.Client, blockHash common.Hash, maxRetries int) (*types.Block, error) {
+	var block *types.Block
+	var err error
+
+	for i := 0; i < maxRetries; i++ {
+		block, err = client.BlockByHash(ctx, blockHash)
+		if err == nil {
+			return block, nil
+		}
+
+		// Check if the error is a rate limit error
+		if strings.Contains(err.Error(), "429 Too Many Requests") {
+			backoffDuration := time.Duration(i+1) * time.Second
+			fmt.Printf("[WARN] Rate limit exceeded, retrying in %s...\n", backoffDuration)
+			time.Sleep(backoffDuration)
+		} else {
+			return nil, err
+		}
+	}
+
+	return nil, fmt.Errorf("failed to retrieve block after %d retries: %v", maxRetries, err)
 }
