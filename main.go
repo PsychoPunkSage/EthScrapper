@@ -46,6 +46,7 @@ func main() {
 		return
 	}
 
+	// Get all Env variables.
 	infuraProjectId := os.Getenv("INFURA_PROJECT_ID")
 	redisHost := os.Getenv("REDIS_HOST")
 	redisPort := os.Getenv("REDIS_PORT")
@@ -53,6 +54,7 @@ func main() {
 	contractAddress := os.Getenv("CONTRACT_ADDRESS")
 	topic := os.Getenv("TOPIC")
 
+	// Get am Ethereum Client
 	client, err := ethclient.Dial("https://sepolia.infura.io/v3/" + infuraProjectId)
 	if err != nil {
 		log.Fatalf("[ERROR]		Failed to connect to Ethereum node\n")
@@ -60,11 +62,12 @@ func main() {
 		return
 	}
 
-	chainid, err := client.ChainID(ctx)
-	if err != nil {
-		log.Fatalf("[ERROR]		Failed to get ChainID: %v", err)
-	}
-	fmt.Printf("[INFO]		ChainID: %d\n", chainid.Int64())
+	// Test Connection
+	// chainid, err := client.ChainID(ctx)
+	// if err != nil {
+	// 	log.Fatalf("[ERROR]		Failed to get ChainID: %v", err)
+	// }
+	// fmt.Printf("[INFO]		ChainID: %d\n", chainid.Int64())
 
 	header, err := client.HeaderByNumber(ctx, nil)
 	if err != nil {
@@ -72,24 +75,27 @@ func main() {
 	}
 	fmt.Printf("[INFO]		Latest block number: %d\n", header.Number.Uint64())
 
-	// CHANGED: Redis client is created once and reused
+	// Getting a Redis client
 	rdb := redis.NewClient(&redis.Options{
 		Addr:     redisHost + ":" + redisPort,
 		Password: redisPassword,
 		DB:       0,
 	})
 
+	// Test Redis Client Connection
 	TestDatabase(rdb)
 	retrieve(rdb)
 
+	// Get correct format of Topic, ContractAddress and Current BlockNumber
 	topicHash := common.HexToHash(topic)
 	address := common.HexToAddress(contractAddress)
 	blockNumberBig := big.NewInt(int64(header.Number.Uint64()))
 
+	// Query: Filter out required Topic
 	query := ethereum.FilterQuery{
 		Addresses: []common.Address{address},
 		Topics:    [][]common.Hash{{topicHash}},
-		FromBlock: new(big.Int).Sub(blockNumberBig, big.NewInt(100)),
+		FromBlock: new(big.Int).Sub(blockNumberBig, big.NewInt(1000)),
 		ToBlock:   blockNumberBig,
 	}
 
@@ -103,15 +109,15 @@ func main() {
 	fmt.Printf("[INFO]        	- related to Topic <%v>\n", topicHash)
 	fmt.Printf("[INFO]        	- in Contract Address <%v>\n", address)
 
-	// CHANGED: Define batch size for Redis pipeline
+	// Define batch size for Redis pipeline (To enable Batch writing to make things Fast.)
 	batchSize := 100
-	pipe := rdb.Pipeline() // CHANGED: Start a Redis pipeline
+	pipe := rdb.Pipeline()
 	defer pipe.Close()
 
 	index := 0
 	for _, vlog := range logs {
 		wg.Add(1)
-		go func(vlog types.Log, index int) { // CHANGED: Added goroutines for concurrent processing
+		go func(vlog types.Log, index int) {
 			defer wg.Done()
 
 			block, err := client.BlockByHash(ctx, vlog.BlockHash)
@@ -136,8 +142,8 @@ func main() {
 			key := strconv.Itoa(index)
 			pipe.Set(ctx, key, serializedData, 0) // CHANGED: Add to pipeline instead of setting directly
 
-			if (index+1)%batchSize == 0 || index == len(logs)-1 {
-				_, err = pipe.Exec(ctx) // CHANGED: Execute the pipeline in batches
+			if (index+1)%batchSize == 0 /* || index == len(logs)-1*/ {
+				_, err = pipe.Exec(ctx) // Execute the pipeline in batches
 				if err != nil {
 					log.Printf("[ERROR]        Failed to execute pipeline: %v", err)
 				}
@@ -147,13 +153,18 @@ func main() {
 		index++
 	}
 
-	wg.Wait() // CHANGED: Wait for all goroutines to finish
+	wg.Wait()
+
+	if _, err := pipe.Exec(ctx); err != nil {
+		log.Printf("[ERROR]        Failed to execute final pipeline: %v", err)
+	}
 
 	log.Println("|=================================|")
 	log.Println("| All events stored successfully. |")
 	log.Println("|=================================|")
 
 	retrieve(rdb)
+	exportDataToLogFile(rdb, "redis.log")
 }
 
 func retrieve(rdb *redis.Client) {
@@ -163,6 +174,16 @@ func retrieve(rdb *redis.Client) {
 	}
 
 	log.Printf("Found <%d> keys in Redis\n", len(keys))
+
+	//// Uncomment below code if you want to see key, value pairs being printed.
+
+	// for _, key := range keys {
+	// 	val, err := rdb.Get(ctx, key).Result()
+	// 	if err != nil {
+	// 		log.Fatalf("Failed to fetch value for key %s: %v", key, err)
+	// 	}
+	// 	log.Printf("Key: %s, Value: %s\n", key, val)
+	// }
 }
 
 func TestDatabase(rdb *redis.Client) {
@@ -179,4 +200,34 @@ func TestDatabase(rdb *redis.Client) {
 	if err != nil {
 		log.Fatalf("[ERROR]        Failed to store data in Redis: %v", err)
 	}
+}
+
+// Export key-value pairs to a .log file
+func exportDataToLogFile(rdb *redis.Client, filename string) {
+	file, err := os.Create(filename)
+	if err != nil {
+		log.Fatalf("Failed to create log file: %v", err)
+	}
+	defer file.Close()
+
+	keys, err := rdb.Keys(ctx, "*").Result()
+	if err != nil {
+		log.Fatalf("Failed to fetch keys: %v", err)
+	}
+
+	for _, key := range keys {
+		val, err := rdb.Get(ctx, key).Result()
+		if err != nil {
+			log.Printf("Failed to fetch value for key %s: %v", key, err)
+			continue
+		}
+
+		logEntry := fmt.Sprintf("Key: %s, Value: %s\n", key, val)
+		_, err = file.WriteString(logEntry)
+		if err != nil {
+			log.Printf("Failed to write log entry: %v", err)
+		}
+	}
+
+	log.Printf("Exported %d key-value pairs to %s\n", len(keys), filename)
 }
