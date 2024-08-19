@@ -8,10 +8,13 @@ import (
 	"math/big"
 	"os"
 	"strconv"
+	"strings"
+	"sync" // CHANGED: Added for concurrency
 	"time"
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/go-redis/redis/v8"
 	"github.com/joho/godotenv"
@@ -29,7 +32,10 @@ type TestData struct {
 	Data    uint   `json:"data"`
 }
 
-var ctx = context.Background()
+var (
+	ctx = context.Background()
+	wg  sync.WaitGroup // CHANGED: Added for goroutine synchronization
+)
 
 func main() {
 	fmt.Println("Welcome to EthScrapper for Sepolia")
@@ -41,146 +47,144 @@ func main() {
 		return
 	}
 
-	// Get all the data from the .env file (all are #strings)
+	// Get all Env variables.
 	infuraProjectId := os.Getenv("INFURA_PROJECT_ID")
 	redisHost := os.Getenv("REDIS_HOST")
 	redisPort := os.Getenv("REDIS_PORT")
 	redisPassword := os.Getenv("REDIS_PASSWORD")
-	// contractAddress := os.Getenv("CONTRACT_ADDRESS")
+	contractAddress := os.Getenv("CONTRACT_ADDRESS")
 	topic := os.Getenv("TOPIC")
 
-	// fmt.Println(reflect.TypeOf(alchemyProjectId))
-	// fmt.Println(reflect.TypeOf(redisHost))
-	// fmt.Println(reflect.TypeOf(redisPort))
-	// fmt.Println(reflect.TypeOf(redisPassword))
-	// fmt.Println(reflect.TypeOf(contractAddress))
-	// fmt.Println(reflect.TypeOf(topic))
-
-	// Connect to Sepolia
+	// Get am Ethereum Client
 	client, err := ethclient.Dial("https://sepolia.infura.io/v3/" + infuraProjectId)
 	if err != nil {
 		log.Fatalf("[ERROR]		Failed to connect to Ethereum node\n")
-		log.Fatalf("[ERROR]		Check you Project ID (i.e. RPC-URL)\n")
 		fmt.Println(err)
 		return
 	}
 
-	chainid, err := client.ChainID(context.Background())
-	if err != nil {
-		log.Fatalf("[ERROR]		Failed to get ChainID: %v", err)
-	}
-	fmt.Printf("[INFO]		ChainID: %d\n", chainid.Int64())
+	// Test Connection
+	// chainid, err := client.ChainID(ctx)
+	// if err != nil {
+	// 	log.Fatalf("[ERROR]		Failed to get ChainID: %v", err)
+	// }
+	// fmt.Printf("[INFO]		ChainID: %d\n", chainid.Int64())
 
-	// Check RPC connection (Print latest Block)
 	header, err := client.HeaderByNumber(ctx, nil)
 	if err != nil {
 		log.Fatalf("[ERROR]		Failed to get latest block: %v", err)
 	}
 	fmt.Printf("[INFO]		Latest block number: %d\n", header.Number.Uint64())
 
-	// Connect with Redis
+	// Getting a Redis client
 	rdb := redis.NewClient(&redis.Options{
 		Addr:     redisHost + ":" + redisPort,
 		Password: redisPassword,
 		DB:       0,
 	})
 
-	// Test Redis Connection
+	// Test Redis Client Connection
 	TestDatabase(rdb)
-	retrieve(redisHost, redisPort, redisPassword)
+	retrieve(rdb)
 
-	// Topic and Address:
-	_ = common.HexToAddress("0xb02A2EdA1b317FBd16760128836B0Ac59B560e9D")
+	// Get correct format of Topic, ContractAddress and Current BlockNumber
 	topicHash := common.HexToHash(topic)
+	address := common.HexToAddress(contractAddress)
+	blockNumberBig := big.NewInt(int64(header.Number.Uint64()))
 
-	blockNumber, err := client.BlockNumber(context.Background())
-	if err != nil {
-		fmt.Println("Failed to retrieve block number:", err)
-		return
+	// Query: Filter out required Topic
+	query := ethereum.FilterQuery{
+		Addresses: []common.Address{address},
+		Topics:    [][]common.Hash{{topicHash}},
+		FromBlock: new(big.Int).Sub(blockNumberBig, big.NewInt(1000)),
+		ToBlock:   blockNumberBig,
 	}
-	blockNumberBig := big.NewInt(int64(blockNumber))
-	// eventSignatureBytes := []byte("Approve(address,uint256)")
-	// fmt.Printf("[INFO]        Event Signer: %v\n", eventSignatureBytes)
-	// eventSignaturehash := crypto.Keccak256Hash(eventSignatureBytes)
-	// fmt.Printf("[INFO]        Event Signer (hash): %v\n", eventSignaturehash)
 
-	// query logs
-	q := ethereum.FilterQuery{
-		FromBlock: new(big.Int).Sub(blockNumberBig, big.NewInt(10000)),
-		// FromBlock: big.NewInt(0),
-		ToBlock: blockNumberBig,
-		Topics: [][]common.Hash{
-			{topicHash},
-		},
-	}
-	// fmt.Printf("Found Query: \n%v \n", query)
-
-	logs, err := client.FilterLogs(ctx, q)
+	logs, err := client.FilterLogs(ctx, query)
 	if err != nil {
 		log.Fatalf("[ERROR]		Failed to query logs\n")
 		fmt.Println(err)
 		return
 	}
-	fmt.Printf("[INFO]        Found %d logs\n", len(logs))
+	fmt.Printf("[INFO]		Found <%d> logs\n", len(logs))
+	fmt.Printf("[INFO]        	- related to Topic <%v>\n", topicHash)
+	fmt.Printf("[INFO]        	- in Contract Address <%v>\n", address)
 
-	// Store logs in Redis
+	// Define batch size for Redis pipeline (To enable Batch writing to make things Fast.)
+	batchSize := 100
+	pipe := rdb.Pipeline()
+	defer pipe.Close()
+
 	index := 0
-	for _, vlogs := range logs {
-		fmt.Printf("Log: %+v\n", vlogs)
-		block, err := client.BlockByHash(ctx, vlogs.BlockHash)
-		if err != nil {
-			log.Fatalf("[ERROR]		Failed to retrieve block: %v", err)
-		}
+	for _, vlog := range logs {
+		wg.Add(1)
+		go func(vlog types.Log, index int) {
+			defer wg.Done()
 
-		// Extract Data in question
-		data := EventData{
-			L1RootInfo: string(vlogs.Data),
-			Blocktime:  time.Unix(int64(block.Time()), 0),
-			ParentHash: block.ParentHash(),
-			LogIndex:   vlogs.Index,
-		}
+			block, err := fetchBlockWithRetry(client, vlog.BlockHash, 5)
+			if err != nil {
+				log.Printf("[ERROR]		Failed to retrieve block: %v", err)
+				return
+			}
 
-		// Serialize the data (Go Data ==> JSON)
-		serializedData, err := json.Marshal(data)
-		if err != nil {
-			log.Fatalf("[ERROR]        Failed to serialize data: %v", err)
-		}
+			data := EventData{
+				L1RootInfo: string(vlog.Data),
+				Blocktime:  time.Unix(int64(block.Time()), 0),
+				ParentHash: block.ParentHash(),
+				LogIndex:   vlog.Index,
+			}
 
-		// Store data in RedisDB
-		err = rdb.Set(ctx, strconv.Itoa(index), serializedData, 0).Err()
-		if err != nil {
-			log.Fatalf("[ERROR]        Failed to store data in Redis: %v", err)
-		}
+			serializedData, err := json.Marshal(data)
+			if err != nil {
+				log.Printf("[ERROR]        Failed to serialize data: %v", err)
+				return
+			}
+
+			key := strconv.Itoa(index)
+			pipe.Set(ctx, key, serializedData, 0) // CHANGED: Add to pipeline instead of setting directly
+
+			if (index+1)%batchSize == 0 /* || index == len(logs)-1*/ {
+				_, err = pipe.Exec(ctx) // Execute the pipeline in batches
+				if err != nil {
+					log.Printf("[ERROR]        Failed to execute pipeline: %v", err)
+				}
+			}
+		}(vlog, index)
 
 		index++
+	}
+
+	wg.Wait()
+
+	if _, err := pipe.Exec(ctx); err != nil {
+		log.Printf("[ERROR]        Failed to execute final pipeline: %v", err)
 	}
 
 	log.Println("|=================================|")
 	log.Println("| All events stored successfully. |")
 	log.Println("|=================================|")
+
+	retrieve(rdb)
+	exportDataToLogFile(rdb, "redis.log")
 }
 
-func retrieve(redisHost, redisPort, redisPassword string) {
-	// Connect to Redis
-	rdb := redis.NewClient(&redis.Options{
-		Addr:     redisHost + ":" + redisPort,
-		Password: redisPassword,
-		DB:       0,
-	})
-
-	// Fetch and print all keys and values
+func retrieve(rdb *redis.Client) {
 	keys, err := rdb.Keys(ctx, "*").Result()
 	if err != nil {
 		log.Fatalf("Failed to fetch keys: %v", err)
 	}
 
-	for _, key := range keys {
-		val, err := rdb.Get(ctx, key).Result()
-		if err != nil {
-			log.Fatalf("Failed to fetch value for key %s: %v", key, err)
-		}
-		log.Printf("Key: %s, Value: %s\n", key, val)
-	}
+	log.Printf("Found <%d> keys in Redis\n", len(keys))
+
+	//// Uncomment below code if you want to see key, value pairs being printed.
+
+	// for _, key := range keys {
+	// 	val, err := rdb.Get(ctx, key).Result()
+	// 	if err != nil {
+	// 		log.Fatalf("Failed to fetch value for key %s: %v", key, err)
+	// 	}
+	// 	log.Printf("Key: %s, Value: %s\n", key, val)
+	// }
 }
 
 func TestDatabase(rdb *redis.Client) {
@@ -193,8 +197,61 @@ func TestDatabase(rdb *redis.Client) {
 		log.Fatalf("[ERROR]        Failed to serialize data: %v", err)
 	}
 
-	err = rdb.Set(ctx, strconv.Itoa(19), serializedData, 0).Err()
+	err = rdb.Set(ctx, strconv.Itoa(19112929), serializedData, 0).Err()
 	if err != nil {
 		log.Fatalf("[ERROR]        Failed to store data in Redis: %v", err)
 	}
+}
+
+// Export key-value pairs to a .log file
+func exportDataToLogFile(rdb *redis.Client, filename string) {
+	file, err := os.Create(filename)
+	if err != nil {
+		log.Fatalf("Failed to create log file: %v", err)
+	}
+	defer file.Close()
+
+	keys, err := rdb.Keys(ctx, "*").Result()
+	if err != nil {
+		log.Fatalf("Failed to fetch keys: %v", err)
+	}
+
+	for _, key := range keys {
+		val, err := rdb.Get(ctx, key).Result()
+		if err != nil {
+			log.Printf("Failed to fetch value for key %s: %v", key, err)
+			continue
+		}
+
+		logEntry := fmt.Sprintf("Key: %s, Value: %s\n", key, val)
+		_, err = file.WriteString(logEntry)
+		if err != nil {
+			log.Printf("Failed to write log entry: %v", err)
+		}
+	}
+
+	log.Printf("Exported %d key-value pairs to %s\n", len(keys), filename)
+}
+
+func fetchBlockWithRetry(client *ethclient.Client, blockHash common.Hash, maxRetries int) (*types.Block, error) {
+	var block *types.Block
+	var err error
+
+	for i := 0; i < maxRetries; i++ {
+		block, err = client.BlockByHash(ctx, blockHash)
+		if err == nil {
+			return block, nil
+		}
+
+		// Check if the error is a rate limit error
+		if strings.Contains(err.Error(), "429 Too Many Requests") {
+			backoffDuration := time.Duration(i+1) * time.Second
+			fmt.Printf("[WARN] Rate limit exceeded, retrying in %s...\n", backoffDuration)
+			time.Sleep(backoffDuration)
+		} else {
+			return nil, err
+		}
+	}
+
+	return nil, fmt.Errorf("failed to retrieve block after %d retries: %v", maxRetries, err)
 }
